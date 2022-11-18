@@ -1,9 +1,10 @@
 import {
   Field,
-  Experimental
+  Experimental,
+  MerkleTree
 } from 'snarkyjs';
 
-export class MerkleTree <
+export class MerkleTreeClass <
   Node extends {
     getHash(): Field
   }
@@ -12,7 +13,7 @@ export class MerkleTree <
 
   constructor(public readonly height: number) {
     super();
-    this.tree = new Experimental.MerkleTree(height);
+    this.tree = new MerkleTree(height);
   }
 
   // setAll(key: bigint, value: Node) {

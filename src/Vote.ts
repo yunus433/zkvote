@@ -94,7 +94,7 @@ export class Vote extends SmartContract {
   @state(UInt64) startTime = State<UInt64>();
   @state(UInt64) endTime = State<UInt64>();
   
- recuder = Reducer({ actionType: Ballot });
+ reducer = Reducer({ actionType: Ballot });
 
   deploy(args: DeployArgs) {
     super.deploy(args);
@@ -154,7 +154,7 @@ export class Vote extends SmartContract {
 
     const ballot = new Ballot(voter.key, votes);
 
-    this.recuder.dispatch(ballot);
+    this.reducer.dispatch(ballot);
   }
 
   @method tallyElection() {
