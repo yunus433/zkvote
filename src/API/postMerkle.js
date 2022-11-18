@@ -1,5 +1,4 @@
 const { pinJSONToIPFS } = require("./pinJSONtoIPFS.js")
-const { metadata }  = require("./metadata.js")
 const { merkletree} = require("./merkleTree.js")
 
 require('dotenv').config()
@@ -9,8 +8,6 @@ const postMerkle = async (
     candidates,
 ) => {
  
-    // Import hash into proper section in metadata
-    // Prepare metadata for Pinata
     const votersJSON = merkletree(
        voters
     )
@@ -19,14 +16,17 @@ const postMerkle = async (
         candidates
      )
 
-    // Upload json to ifps 
-    // Get json hash
-    const metadataURI = await pinJSONToIPFS(
+    const votersJsonURI = await pinJSONToIPFS(
         process.env.PINATAAPIKEY,
         process.env.PINATASECRETAPIKEY,
-        tokenMetadata
+        votersJSON
     )
-    return metadataURI
+    const candidatesJsonURI = await pinJSONToIPFS(
+        process.env.PINATAAPIKEY,
+        process.env.PINATASECRETAPIKEY,
+        candidatesJSON
+    )
+    return (votersJsonURI,candidatesJsonURI)
 }
 
 module.exports = { postMerkle }
