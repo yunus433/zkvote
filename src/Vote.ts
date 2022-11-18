@@ -16,7 +16,8 @@ import {
   Experimental,
   UInt64,
   arrayProp,
-  PublicKey
+  PublicKey,
+  MerkleWitness
 } from 'snarkyjs';
 
 import { fieldLog2LowerLimit } from './utilities';
@@ -28,7 +29,7 @@ let initialVotersMerkleRoot: Field = Field(0); // off-chain storage
 let intiialCandidatesMerkleRoot: Field = Field(0);
 let initialCandidateCount: UInt32 = UInt32.from(0);
 
-class MerkleWitness extends Experimental.MerkleWitness(8) {}
+class MerkleWitnessClass extends MerkleWitness(8) {}
 
 class Voter extends CircuitValue {
   @prop key: PublicKey;
@@ -104,7 +105,7 @@ export class Vote extends SmartContract {
     this.candidateCount.set(initialCandidateCount);
   }
 
-  @method createBallot(key: PrivateKey, votes: UInt32[], path: MerkleWitness) { // Proof
+  @method createBallot(key: PrivateKey, votes: UInt32[], path: MerkleWitnessClass) { // Proof
     // Election Conditions
     const isFinished = this.isFinished.get();
     this.isFinished.get().assertEquals(isFinished);
