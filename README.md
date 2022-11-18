@@ -1,4 +1,4 @@
-# Mina zkApp: Zk_vote_open
+# Mina zkApp: Mina Private Voting
 
 This template uses TypeScript.
 
