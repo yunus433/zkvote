@@ -91,7 +91,9 @@ export class Vote extends SmartContract {
   @state(Field) candidatesAccumulator = State<Field>(); // Temp variable
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
   @state(Bool) isFinished = State<Bool>();
-
+  @state(UInt64) startTime = State<UInt64>();
+  @state(UInt64) endTime = State<UInt64>();
+  
  recuder = Reducer({ actionType: Ballot });
 
   deploy(args: DeployArgs) {
@@ -101,16 +103,26 @@ export class Vote extends SmartContract {
       editState: Permissions.proofOrSignature(),
       editSequenceState: Permissions.proofOrSignature(),
     });
-    this.voters.set(initialVotersMerkleRoot); // Final state of publci keys
+    this.voters.set(initialVotersMerkleRoot); // Final state of public keys
     this.candidates.set(intiialCandidatesMerkleRoot);
     this.candidateCount.set(initialCandidateCount);
+    this.startTime.set(this.network.timestamp.get());
+    this.endTime.set(this.network.timestamp.get().add(1000 * 60 * 60));
   }
 
   @method createBallot(key: PrivateKey, votes: UInt32[], path: MerkleWitnessClass) { // Proof
     // Election Conditions
+    /* 
     const isFinished = this.isFinished.get();
     this.isFinished.get().assertEquals(isFinished);
-    isFinished.assertEquals(Bool(false));
+    isFinished.assertEquals(Bool(false)); 
+    */
+
+    // Check if election is started and not finished
+    const startTime = this.startTime.get()
+    const endTime = this.endTime.get() 
+    this.network.timestamp.assertBetween(startTime, endTime);
+
 
     // Voter Conditions
     let voters = this.voters.get();
@@ -147,11 +159,16 @@ export class Vote extends SmartContract {
 
   @method tallyElection() {
     // Election Conditions
+    /*
     const isFinished = this.isFinished.get();
     this.isFinished.get().assertEquals(isFinished);
     isFinished.assertEquals(Bool(false));
-
     this.isFinished.set(Bool(true)); // Finish the election, start the count
+*/
+
+    const endTime = this.endTime.get();
+    const now = this.network.timestamp.get()
+    endTime.assertGt(now);
 
     let { state: newCommittedVotes, actionsHash: newAccumulatedVotes } =
       this.reducer.reduce(

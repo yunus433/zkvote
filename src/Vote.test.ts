@@ -36,7 +36,7 @@ describe('Vote', () => {
       zkAppInstance.deploy({ zkappKey: zkAppPrivateKey });
       zkAppInstance.sign(zkAppPrivateKey);
     });
-    await txn.send().wait();
+    await txn.send();
   });
 
   afterAll(async () => {
@@ -66,7 +66,7 @@ describe('Vote', () => {
       );
       zkAppInstance.sign(zkAppPrivateKey);
     });
-    await txn.send().wait();
+    await txn.send();
 
     expect(zkAppInstance.election.get().startTime.toFields()).toEqual(electionProps.startTime.toFields());
     expect(zkAppInstance.election.get().endTime.toFields()).toEqual(electionProps.endTime.toFields());
