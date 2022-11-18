@@ -17,7 +17,8 @@ import {
   UInt64,
   arrayProp,
   PublicKey,
-  MerkleWitness
+  MerkleWitness,
+  Reducer
 } from 'snarkyjs';
 
 import { fieldLog2LowerLimit } from './utilities';
@@ -91,7 +92,7 @@ export class Vote extends SmartContract {
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
   @state(Bool) isFinished = State<Bool>();
 
- recuder = Experimental.Reducer({ actionType: Ballot });
+ recuder = Reducer({ actionType: Ballot });
 
   deploy(args: DeployArgs) {
     super.deploy(args);
