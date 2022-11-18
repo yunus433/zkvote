@@ -46,10 +46,7 @@ describe('Vote', () => {
   it('generates and deploys the `Vote` smart contract with election params', async () => {
     const electionProps = {
       startTime: UInt64.from((new Date()).getTime()),
-      endTime: UInt64.from((new Date()).getTime() + (24 * 60 * 60 * 1000)),
-      minVoteCountPerBallot: UInt32.from(1),
-      maxVoteCountPerBallot: UInt32.from(1),
-      isMultipleAllowed: Bool(false),
+      endTime: UInt64.from((new Date()).getTime() + (3 * 60 * 60 * 1000)),
       candidateCount: UInt32.from(5),
       voterCount: UInt32.from(100)
     };
@@ -58,9 +55,6 @@ describe('Vote', () => {
       zkAppInstance.createElection(
         electionProps.startTime,
         electionProps.endTime,
-        electionProps.minVoteCountPerBallot,
-        electionProps.maxVoteCountPerBallot,
-        electionProps.isMultipleAllowed,
         electionProps.candidateCount,
         electionProps.voterCount
       );
@@ -70,9 +64,6 @@ describe('Vote', () => {
 
     expect(zkAppInstance.election.get().startTime.toFields()).toEqual(electionProps.startTime.toFields());
     expect(zkAppInstance.election.get().endTime.toFields()).toEqual(electionProps.endTime.toFields());
-    expect(zkAppInstance.election.get().minVoteCountPerBallot).toEqual(electionProps.minVoteCountPerBallot);
-    expect(zkAppInstance.election.get().maxVoteCountPerBallot).toEqual(electionProps.maxVoteCountPerBallot);
-    expect(zkAppInstance.election.get().isMultipleAllowed).toEqual(electionProps.isMultipleAllowed);
     expect(zkAppInstance.election.get().candidateCount).toEqual(electionProps.candidateCount);
     expect(zkAppInstance.election.get().voterCount).toEqual(electionProps.voterCount);
   });

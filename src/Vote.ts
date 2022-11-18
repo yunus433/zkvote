@@ -18,7 +18,8 @@ import {
   arrayProp,
   PublicKey,
   MerkleWitness,
-  Reducer
+  Reducer,
+  MerkleTree
 } from 'snarkyjs';
 
 import { fieldLog2LowerLimit } from './utilities';
@@ -26,9 +27,6 @@ import { fieldLog2LowerLimit } from './utilities';
 const MAX_CANDIDATE_COUNT = 1e2; // Max candidate count in an election
 const MAX_VOTER_COUNT = 1e6; // Max voter count in an election
 
-let initialVotersMerkleRoot: Field = Field(0); // off-chain storage
-let intiialCandidatesMerkleRoot: Field = Field(0);
-let initialCandidateCount: UInt32 = UInt32.from(0);
 
 class MerkleWitnessClass extends MerkleWitness(8) {}
 
@@ -86,11 +84,10 @@ class Ballot extends CircuitValue { // Oy pusulası
 }
 
 export class Vote extends SmartContract {
-  @state(Field) voters = State<Field>(); // Merkle tree
-  @state(Field) candidates = State<Field>(); // Merkle tree
+  @state(Field) voterTreeRoot = State<Field>(); // Merkle tree
+  @state(Field) candidateTreeRoot = State<Field>(); // Merkle tree
   @state(Field) candidatesAccumulator = State<Field>(); // Temp variable
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
-  @state(Bool) isFinished = State<Bool>();
   @state(UInt64) startTime = State<UInt64>();
   @state(UInt64) endTime = State<UInt64>();
   
@@ -103,20 +100,26 @@ export class Vote extends SmartContract {
       editState: Permissions.proofOrSignature(),
       editSequenceState: Permissions.proofOrSignature(),
     });
-    this.voters.set(initialVotersMerkleRoot); // Final state of public keys
-    this.candidates.set(intiialCandidatesMerkleRoot);
-    this.candidateCount.set(initialCandidateCount);
-    this.startTime.set(this.network.timestamp.get());
-    this.endTime.set(this.network.timestamp.get().add(1000 * 60 * 60));
+    this.voterTreeRoot.set(Field(0)); // Final state of public keys
+    this.candidateTreeRoot.set(Field(0));
+    this.candidateCount.set(UInt32.zero);
+    this.startTime.set(UInt64.zero)
+    this.endTime.set(UInt64.zero);
+  }
+
+  @method setElection(startTime: UInt64, endTime: UInt64, votersArray: PublicKey[], candidateArray: PublicKey[]){
+    this.startTime.set(startTime);
+    this.endTime.set(endTime);
+    // Store voters array at DB
+    // Calculate merkle root of voters array and set as state 
+    // Store candidates array at DB
+    // Calculate merkle root of candidates array and set as state 
+
+
   }
 
   @method createBallot(key: PrivateKey, votes: UInt32[], path: MerkleWitnessClass) { // Proof
     // Election Conditions
-    /* 
-    const isFinished = this.isFinished.get();
-    this.isFinished.get().assertEquals(isFinished);
-    isFinished.assertEquals(Bool(false)); 
-    */
 
     // Check if election is started and not finished
     const startTime = this.startTime.get()
@@ -159,13 +162,7 @@ export class Vote extends SmartContract {
 
   @method tallyElection() {
     // Election Conditions
-    /*
-    const isFinished = this.isFinished.get();
-    this.isFinished.get().assertEquals(isFinished);
-    isFinished.assertEquals(Bool(false));
-    this.isFinished.set(Bool(true)); // Finish the election, start the count
-*/
-
+ 
     const endTime = this.endTime.get();
     const now = this.network.timestamp.get()
     endTime.assertGt(now);
@@ -174,7 +171,7 @@ export class Vote extends SmartContract {
       this.reducer.reduce(
         this.reducer.getActions({ fromActionHash: accumulatedVotes }), // actionsHash is an array of ALL valid ballots
         Field,
-        (state: Field, action: Member) => {
+        (state: Field, action: Candidate) => {
           // apply one vote
           action = action.addVote();
           // this is the new root after we added one vote
