@@ -16,11 +16,11 @@ import {
   MerkleWitness,
   Reducer,
   Struct,
+  CircuitValue,
+  prop
 } from 'snarkyjs';
 
-const MAX_CANDIDATE_COUNT = 1e2; // Max candidate count in an election
-
-class MerkleWitnessClass extends MerkleWitness(8) {}
+class MerkleWitnessClass extends MerkleWitness(8) { }
 
 class Voter extends Struct({
   key: PublicKey,
@@ -39,55 +39,39 @@ class Voter extends Struct({
   vote(): Voter {
     return new Voter(this.key, Bool(true));
   }
-}
+};
 
-// class Candidate extends Struct({
-//   key: Field, // Merkle tree index
-//   voteCount: Field
-// }) {
-//   constructor(key: Field, voteCount: Field) {
-//     super({ key, voteCount });
-//     this.key = key;
-//     this.voteCount = voteCount;
-//   }
+class Candidate extends CircuitValue {
+  @prop key: Field;
+  @prop voteCount: Field;
+  @prop witness: MerkleWitnessClass;
 
-//   hash(): Field {
-//     return Poseidon.hash(this.key.toFields().concat(this.voteCount.toFields()));
-//   }
-
-//   addVote(): Candidate {
-//     return new Candidate(this.key, this.voteCount.add(1));
-//   }
-// };
-
-class Ballot extends Struct({
-  voterPublicKey: PublicKey,
-  votes: Array.from({ length: MAX_CANDIDATE_COUNT }, () => UInt32), // 0, 1, 0, 0, 0 => 5 candidate, vote for 2nd
-}) {
-  // Oy pusulası
-  constructor(voterPublicKey: PublicKey, votes: UInt32[]) {
-    super({ voterPublicKey, votes });
-    this.voterPublicKey = voterPublicKey;
-    this.votes = votes;
+  constructor(key: Field, voteCount: Field) {
+    super({ key, voteCount });
+    this.key = key;
+    this.voteCount = voteCount;
   }
 
   hash(): Field {
-    const votes = this.votes
-      .map((each) => each.toFields())
-      .reduce((arr, each) => arr.concat(each), []);
-    return Poseidon.hash(this.voterPublicKey.toFields().concat(votes));
+    return Poseidon.hash(this.key.toFields().concat(this.voteCount.toFields()));
   }
-}
+
+  addVote(): Candidate {
+    return new Candidate(this.key, this.voteCount.add(1));
+  }
+};
 
 export class Vote extends SmartContract {
   @state(Field) voterTreeRoot = State<Field>(); // Merkle tree
-  @state(Field) candidateTreeRoot = State<Field>(); // Merkle tree
-  @state(Field) candidatesAccumulator = State<Field>(); // Temp variable
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
   @state(UInt64) startTime = State<UInt64>();
   @state(UInt64) endTime = State<UInt64>();
 
-  reducer = Reducer({ actionType: Ballot });
+  @state(Bool) isFinished = State<Bool>();
+  @state(Field) committedCandidates = State<Field>();
+  @state(Field) accumulatedCandidates = State<Field>();
+
+  reducer = Reducer({ actionType: Candidate });
 
   deploy(args: DeployArgs) {
     super.deploy(args);
@@ -97,11 +81,13 @@ export class Vote extends SmartContract {
       editSequenceState: Permissions.proofOrSignature(),
     });
     this.voterTreeRoot.set(Field(0)); // Final state of public keys
-    this.candidateTreeRoot.set(Field(0));
     this.candidateCount.set(UInt32.zero);
     this.startTime.set(UInt64.zero);
     this.endTime.set(UInt64.zero);
-  }
+
+    this.isFinished.set(Bool(false));
+    this.accumulatedCandidates.set(Reducer.initialActionsHash);
+  };
 
   // @method setElection(startTime: UInt64, endTime: UInt64, votersArray: PublicKey[], candidateArray: PublicKey[]){
   //   this.startTime.set(startTime);
@@ -113,7 +99,7 @@ export class Vote extends SmartContract {
 
   // }
 
-  @method createBallot(
+  @method vote(
     key: PrivateKey,
     votes: UInt32[],
     path: MerkleWitnessClass
@@ -163,52 +149,40 @@ export class Vote extends SmartContract {
     const newVoterTreeRoot = path.calculateRoot(newVoter.hash());
     this.voterTreeRoot.set(newVoterTreeRoot);
 
-    const ballot = new Ballot(voter.key, votes);
+    const candidatesToVote = votes.map((each, i) => {
+      return {
+        key: i,
+        vote: each
+      }
+    }).filter(each => each.vote.gt(UInt32.from(0))).map(each => Field(each.key));
 
-    this.reducer.dispatch(ballot);
-  }
+    candidatesToVote.forEach(candidate => this.reducer.dispatch(new Candidate(candidate, Field(0))));
+  };
 
   @method tallyElection() {
-    // Election Conditions
+    const isFinished = this.isFinished.get();
+    this.isFinished.assertEquals(isFinished);
+    isFinished.assertEquals(Bool(false));
 
-    const endTime = this.endTime.get();
-    const now = this.network.timestamp.get();
-    endTime.assertGt(now);
+    const accumulatedCandidates = this.accumulatedCandidates.get();
+    this.accumulatedCandidates.assertEquals(accumulatedCandidates);
 
-    // let { state: newCommittedVotes, actionsHash: newAccumulatedVotes } =
-    //   this.reducer.reduce(
-    //     this.reducer.getActions({ fromActionHash: accumulatedVotes }), // actionsHash is an array of ALL valid ballots
-    //     Field,
-    //     (state: Field, action: Candidate) => {
-    //       // apply one vote
-    //       action = action.addVote();
-    //       // this is the new root after we added one vote
-    //       return action.votesWitness.calculateRoot(action.getHash());
-    //     },
-    //     // initial state
-    //     { state: committedVotes, actionsHash: accumulatedVotes }
-    //   );
-  }
+    const committedCandidates = this.committedCandidates.get();
+    this.committedCandidates.assertEquals(committedCandidates);
 
-  // @method countVotes() {
-  // let accumulator = this.votedTreeAccumulator.get();
-  // this.votedTreeAccumulator.assertEquals(accumulator);
+    const { state: newCommittedCandidates, actionsHash: newAccumulatedCandidates } = this.reducer.reduce(
+      this.reducer.getActions({ fromActionHash: accumulatedCandidates }),
+      Field,
+      (state: Field, action: Candidate) => {
+        action = action.addVote();
 
-  // let votes = this.votedTree.get();
-  // this.votedTree.assertEquals(votes);
+        return action.witness.calculateRoot(action.hash());
+      },
+      { state: committedCandidates, actionsHash: accumulatedCandidates }
+    );
 
-  // let { state: newVotes, actionsHash: newAccumulator } =
-  //   this.reducer.reduce(
-  //     this.reducer.getActions({ fromActionHash: accumulatedVotes }),
-  //     Field,
-  //     (state: Field, action: Member) => {
-  //       // apply one vote
-  //       action = action.addVote();
-  //       // this is the new root after we added one vote
-  //       return action.votesWitness.calculateRoot(action.getHash());
-  //     },
-  //     // initial state
-  //     { state: committedVotes, actionsHash: accumulatedVotes }
-  //   );
-  // }
+    this.accumulatedCandidates.set(newAccumulatedCandidates);
+    this.committedCandidates.set(newCommittedCandidates);
+    this.isFinished.set(Bool(true));
+  };
 }
