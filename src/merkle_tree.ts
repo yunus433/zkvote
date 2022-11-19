@@ -1,12 +1,12 @@
 import {
   Field,
-  Experimental,
-  MerkleTree
+  // Experimental,
+  MerkleTree,
 } from 'snarkyjs';
 
-export class MerkleTreeClass <
+export class MerkleTreeClass<
   Node extends {
-    getHash(): Field
+    getHash(): Field;
   }
 > extends Map<bigint, Node> {
   private tree;
@@ -39,4 +39,4 @@ export class MerkleTreeClass <
   getRoot(): Field {
     return this.tree.getRoot();
   }
-};
+}
