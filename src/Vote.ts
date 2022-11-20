@@ -14,6 +14,7 @@ import {
   Circuit,
   UInt64,
   PublicKey,
+  MerkleTree,
   MerkleWitness,
   Reducer,
   Struct,
@@ -21,7 +22,7 @@ import {
   prop
 } from 'snarkyjs';
 
-import { assertRootUpdateValid } from './offchain-storage.js';
+import { assertRootUpdateValid, get, requestStore, getPublicKey, makeRequest,mapToTree, Update  } from './offchain-storage.js';
 
 export const height = 256;
 
@@ -49,6 +50,7 @@ class Voter extends Struct({
   }
 };
 
+
 class Candidate extends CircuitValue {
   @prop key: Field;
   @prop voteCount: Field;
@@ -75,15 +77,21 @@ export class Vote extends SmartContract {
   @state(Field) candidateTreeRoot = State<Field>(); // Merkle root of candidates
   @state(Field) candidateRootNumber = State<Field>();
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
-  @state(UInt64) startTime = State<UInt64>(); // The starting time of the voting process in UNIX Time
   @state(UInt64) endTime = State<UInt64>(); // The ending time of the voting process in UNIX Time
 
-  @state(Bool) isFinished = State<Bool>();
+ // @state(Bool) isFinished = State<Bool>();
   @state(Field) committedCandidates = State<Field>();
   @state(Field) accumulatedCandidates = State<Field>();
   @state(PublicKey) serverPublicKey = State<PublicKey>();
 
   reducer = Reducer({ actionType: Candidate });
+
+  _serverPublicKey: PublicKey;
+
+  constructor(zkAppAddress: PublicKey, serverPublicKey: PublicKey) {
+    super(zkAppAddress)
+    this._serverPublicKey = serverPublicKey;
+  }
 
   deploy(args: DeployArgs) {
     super.deploy(args);
@@ -92,24 +100,66 @@ export class Vote extends SmartContract {
       editState: Permissions.proofOrSignature(),
       editSequenceState: Permissions.proofOrSignature(),
     });
-    this.voterTreeRoot.set(Field(0)); // Final state of public keys
-    this.candidateCount.set(UInt32.zero);
-    this.startTime.set(UInt64.zero);
-    this.endTime.set(UInt64.zero);
+    
+    const voterTree = new MerkleTree(height);
+    const voterTreeRoot = voterTree.getRoot();
+    this.voterTreeRoot.set(voterTreeRoot);
+    const _voterrootNumber = Field(0);
+    this.voterRootNumber.set(_voterrootNumber);
 
-    this.isFinished.set(Bool(false));
+    const candidateTree = new MerkleTree(height);
+    const candidateTreeRoot = candidateTree.getRoot();
+    this.candidateTreeRoot.set(candidateTreeRoot);
+    const _candidaterootNumber = Field(0);
+    this.candidateRootNumber.set(_candidaterootNumber);
+
+    this.candidateCount.set(UInt32.zero);
+    
+
+
+    //this.isFinished.set(Bool(false));
     this.accumulatedCandidates.set(Reducer.initialActionsHash);
   };
 
-  // @method setElection(startTime: UInt64, endTime: UInt64, votersArray: PublicKey[], candidateArray: PublicKey[]){
-  //   this.startTime.set(startTime);
-  //   this.endTime.set(endTime);
-  //   // Store voters array at DB
-  //   // Calculate merkle root of voters array and set as state
-  //   // Store candidates array at DB
-  //   // Calculate merkle root of candidates array and set as state
+  @method startElection(endTime: UInt64, votersArray: PublicKey[], voterTreeNum: Field, voterTreeSignature: Signature, candidateArray: PublicKey[], candidateTreeNum: Field, candidateRootSignature: Signature){
+    this.endTime.set(endTime);
+    const emptyLeaf = Field(0);
+    const voterTree = new MerkleTree(height);
+    var updates: Update[];
+    for(var index in votersArray){
+      let leaf = Field(votersArray[index].toBase58());
+      voterTree.setLeaf(BigInt(index), leaf)
+      updates.push( {
+        emptyLeaf,
+        leafIsEmpty:Bool(true),
+        leaf,
+        newLeafIsEmpty: Bool(false),
+        leafWitness: voterTree.getWitness(BigInt(index))
+      })
+      // set index* leaf to corresponding public key in from the votersArray
+    }
 
-  // }
+    let voterTreeRoot = this.voterTreeRoot.get();
+    this.voterTreeRoot.assertEquals(voterTreeRoot);
+
+    let voterRootNumber = this.voterRootNumber.get();
+    this.voterRootNumber.assertEquals(voterRootNumber);
+
+    let serverPublicKey = this.serverPublicKey.get();
+    this.serverPublicKey.assertEquals(serverPublicKey);
+
+    const storedNewRoot = assertRootUpdateValid(
+      serverPublicKey,
+      voterRootNumber,
+      voterTreeRoot,
+      updates,
+      voterTreeNum,
+      voterTreeSignature
+    );
+    //then post the final merkle tree to offchain-storage
+    //do the same for the candidateArray
+
+  }
 
   @method vote(
     key: PrivateKey,
@@ -120,9 +170,9 @@ export class Vote extends SmartContract {
     // Election Conditions
 
     // Check if election is started and not finished
-    const startTime = this.startTime.get();
     const endTime = this.endTime.get();
-    this.network.timestamp.assertBetween(startTime, endTime);
+    const now = this.network.timestamp.get();
+    now.assertLt(endTime);
 
     // Voter Conditions
     let voterTreeRoot = this.voterTreeRoot.get();
@@ -172,9 +222,18 @@ export class Vote extends SmartContract {
   };
 
   @method tallyElection() {
+    /*
     const isFinished = this.isFinished.get();
     this.isFinished.assertEquals(isFinished);
     isFinished.assertEquals(Bool(false));
+*/
+    const endTime = this.endTime.get();
+    const now = this.network.timestamp.get();
+    now.assertGt(endTime);
+    // we assumed endTime>startTime
+    // assert endTime>starttime and endTime & startTime is not equal to zero
+    // assert endTime-startTime>minDuration  -> minDuration is equals to a 
+    // small amount of meaningful time on mina blockchain
 
     const accumulatedCandidates = this.accumulatedCandidates.get();
     this.accumulatedCandidates.assertEquals(accumulatedCandidates);
@@ -195,7 +254,7 @@ export class Vote extends SmartContract {
 
     this.accumulatedCandidates.set(newAccumulatedCandidates);
     this.committedCandidates.set(newCommittedCandidates);
-    this.isFinished.set(Bool(true));
+    //this.isFinished.set(Bool(true));
   };
 
   @method update(
