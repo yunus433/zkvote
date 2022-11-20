@@ -4,29 +4,21 @@ const { merkletree} = require("./merkleTree.js")
 require('dotenv').config()
 
 const postMerkle = async (
-    voters,
-    candidates,
+    leaves,
+    root
 ) => {
  
-    const votersJSON = merkletree(
-       voters
+    const treeJSON = merkletree(
+       leaves,
+       root
     )
 
-    const candidatesJSON = merkletree(
-        candidates
-     )
-
-    const votersJsonURI = await pinJSONToIPFS(
+    const treeJsonURI = await pinJSONToIPFS(
         process.env.PINATAAPIKEY,
         process.env.PINATASECRETAPIKEY,
-        votersJSON
+        treeJSON
     )
-    const candidatesJsonURI = await pinJSONToIPFS(
-        process.env.PINATAAPIKEY,
-        process.env.PINATASECRETAPIKEY,
-        candidatesJSON
-    )
-    return (votersJsonURI,candidatesJsonURI)
+    return treeJsonURI
 }
 
 module.exports = { postMerkle }
