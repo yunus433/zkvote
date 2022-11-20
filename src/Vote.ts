@@ -3,6 +3,7 @@ import {
   SmartContract,
   state,
   State,
+  Signature,
   method,
   DeployArgs,
   Permissions,
@@ -19,6 +20,13 @@ import {
   CircuitValue,
   prop
 } from 'snarkyjs';
+
+import { assertRootUpdateValid } from './offchain-storage.js';
+
+export const height = 256;
+
+class OffchainStorageMerkleWitness extends MerkleWitness(height) {}
+
 
 class MerkleWitnessClass extends MerkleWitness(8) { }
 
@@ -62,14 +70,18 @@ class Candidate extends CircuitValue {
 };
 
 export class Vote extends SmartContract {
-  @state(Field) voterTreeRoot = State<Field>(); // Merkle tree
+  @state(Field) voterTreeRoot = State<Field>(); // Merkle root of voters
+  @state(Field) voterRootNumber = State<Field>();
+  @state(Field) candidateTreeRoot = State<Field>(); // Merkle root of candidates
+  @state(Field) candidateRootNumber = State<Field>();
   @state(UInt32) candidateCount = State<UInt32>(); // How many candidates to vote for
-  @state(UInt64) startTime = State<UInt64>();
-  @state(UInt64) endTime = State<UInt64>();
+  @state(UInt64) startTime = State<UInt64>(); // The starting time of the voting process in UNIX Time
+  @state(UInt64) endTime = State<UInt64>(); // The ending time of the voting process in UNIX Time
 
   @state(Bool) isFinished = State<Bool>();
   @state(Field) committedCandidates = State<Field>();
   @state(Field) accumulatedCandidates = State<Field>();
+  @state(PublicKey) serverPublicKey = State<PublicKey>();
 
   reducer = Reducer({ actionType: Candidate });
 
@@ -184,5 +196,52 @@ export class Vote extends SmartContract {
     this.accumulatedCandidates.set(newAccumulatedCandidates);
     this.committedCandidates.set(newCommittedCandidates);
     this.isFinished.set(Bool(true));
+  };
+
+  @method update(
+    leafIsEmpty: Bool,
+    oldNum: Field,
+    num: Field,
+    path: OffchainStorageMerkleWitness,
+    storedNewRoot__: Field,
+    storedNewRootNumber: Field,
+    storedNewRootSignature: Signature
+  ) {
+    let root = this.voterTreeRoot.get();
+    this.voterTreeRoot.assertEquals(root);
+
+    let rootNumber = this.voterRootNumber.get();
+    this.voterRootNumber.assertEquals(rootNumber);
+
+    let serverPublicKey = this.serverPublicKey.get();
+    this.serverPublicKey.assertEquals(serverPublicKey);
+
+    let leaf = [oldNum];
+    let newLeaf = [num];
+
+    // newLeaf can be a function of the existing leaf
+    newLeaf[0].assertGt(leaf[0]);
+
+    const updates = [
+      {
+        leaf,
+        leafIsEmpty,
+        newLeaf,
+        newLeafIsEmpty: Bool(false),
+        leafWitness: path,
+      },
+    ];
+
+    const storedNewRoot = assertRootUpdateValid(
+      serverPublicKey,
+      rootNumber,
+      root,
+      updates,
+      storedNewRootNumber,
+      storedNewRootSignature
+    );
+
+    this.voterTreeRoot.set(storedNewRoot);
+    this.voterRootNumber.set(storedNewRootNumber);
   };
 }
