@@ -10,9 +10,7 @@ const pinJSONToIPFS = (pinataApiKey, pinataSecretApiKey, JSONBody) => {
             }
         })
         .then((response) => {
-            const ipfsHeader = 'ipfs://'
-            const ipfsURI = ipfsHeader.concat(response.data.IpfsHash.toString())
-            console.log(`JSON URI: ${ipfsURI}`)
+            const ipfsURI = response.data.IpfsHash.toString()
             return ipfsURI
         })
         .catch((error) => {
