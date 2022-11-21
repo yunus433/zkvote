@@ -132,21 +132,17 @@ export class Vote extends SmartContract {
     candidate: Field,
     voterPath: MerkleWitnessClass,
     candidatePath: MerkleWitnessClass
-  ) {
+  ): Field {
     // Election Conditions
     // Chech if tally is not called yet
-    const isFinished = this.isFinished.get();
-    this.isFinished.assertEquals(isFinished);
-    isFinished.assertEquals(Bool(false));
-    // Check if election is started and not finished
-    const startTime = this.startTime.get();
-    this.startTime.assertEquals(startTime);
-    const endTime = this.endTime.get();
-    this.endTime.assertEquals(endTime);
-    const now = this.network.timestamp.get();
-    this.network.timestamp.assertEquals(now);
-    now.assertGte(startTime);
-    now.assertLte(endTime);
+    this.isFinished.assertEquals(Bool(false));
+    // // Check if election is started and not finished
+    // this.startTime.assertEquals(this.startTime.get());
+    // this.endTime.assertEquals(this.endTime.get());
+    // this.network.timestamp.assertBetween(
+    //   this.startTime.get(),
+    //   this.endTime.get()  
+    // );
 
     // Voter Conditions
     let votersTree = this.votersTree.get(); // Get merkle root for voters from the state
@@ -172,6 +168,8 @@ export class Vote extends SmartContract {
 
     // Dispatch the event
     this.reducer.dispatch(newCandidate);
+
+    return newVotersTree;
   };
 
   // Tally the election. Count the votes in events and update candidateTree root. Returns an array representing the vote number for each candidate. Can be called only once
