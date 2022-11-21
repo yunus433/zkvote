@@ -20,6 +20,21 @@ import {
   
   // ==============================================================================
   
+let voterTree;
+
+/*
+  pinJSONToPIFS => JSON hash array
+
+  voterTree = new MerkleTree(height);
+
+  for each hash, index in array
+    voterTree.set(index) = hash
+
+  Call SmartContract => hash array (candidate vote count)
+
+  pinJSONToPIFS => POST JSON hash array  
+*/
+
   const printCaution = () =>
     console.log(
       'CAUTION: This project is in development and not to be relied upon to guarantee storage in production environments.'

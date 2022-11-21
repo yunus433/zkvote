@@ -21,3 +21,5 @@ const pinJSONToIPFS = (pinataApiKey, pinataSecretApiKey, JSONBody) => {
 }
 
 module.exports = { pinJSONToIPFS }
+
+// To TS

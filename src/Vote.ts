@@ -20,9 +20,9 @@ import {
 
 const MAX_MERKLE_TREE_HEIGHT = 32;
 
-class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) { }
+export class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) { }
 
-class Voter extends Struct({
+export class Voter extends Struct({
   key: PublicKey,
   isVoted: Bool,
 }) {
@@ -41,17 +41,17 @@ class Voter extends Struct({
   }
 };
 
-class Candidate extends CircuitValue {
+export class Candidate extends CircuitValue {
   @prop key: Field; // Tree index
   @prop voteCount: Field;
   @prop witness: MerkleWitnessClass; // path
 
   constructor(key: Field, voteCount: Field, witness: MerkleWitnessClass) {
-    super({
+    super(
       key,
       voteCount,
       witness
-    });
+    );
     this.key = key;
     this.voteCount = voteCount;
     this.witness = witness;
