@@ -1,6 +1,10 @@
+import {
+    Field
+  } from 'snarkyjs';
+
 const merkletree = (
-    leaves,
-    root
+    leaves: Field[],
+    root: Field
 ) => {
     const leavesJSON = JSON.stringify(leaves);
     

@@ -1,11 +1,15 @@
+import {
+    Field
+  } from 'snarkyjs'
+  
 const { pinJSONToIPFS } = require("./pinJSONtoIPFS.js")
 const { merkletree} = require("./merkleTree.js")
 
 require('dotenv').config()
 
 const postMerkle = async (
-    leaves,
-    root
+    leaves: Field[],
+    root: Field
 ) => {
  
     const treeJSON = merkletree(
