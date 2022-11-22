@@ -18,6 +18,10 @@ import {
   prop
 } from 'snarkyjs';
 
+const { postMerkle } = require("postMerkle.ts")
+const { getMerkle } = require("getMerkle.ts")
+const { merkleTreeJSON } = require("./merkleTree.ts")
+
 const MAX_MERKLE_TREE_HEIGHT = 32;
 
 export class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) { }
@@ -187,6 +191,8 @@ export class Vote extends SmartContract {
     this.candidatesTreeAccumulator.assertEquals(candidatesTreeAccumulator);
 
     // Create API request array [ voteCount ]
+    const {root,leaves} = getMerkle(candidatesTree)
+
     const candidates = Array.from({ length: Number(candidatesCount) }, () => UInt64.from(0));
 
     const { state: newCandidatesTree, actionsHash: newCandidatesTreeAccumulator } = this.reducer.reduce(
@@ -202,9 +208,12 @@ export class Vote extends SmartContract {
       { state: candidatesTree, actionsHash: candidatesTreeAccumulator }
     );
 
+   
     // Offstorage API request
     this.candidatesTreeAccumulator.set(newCandidatesTreeAccumulator);
     this.candidatesTree.set(newCandidatesTree);
+    const newLeaves: Field[] = [];
+    postMerkle(candidatesTree,newLeaves)
     this.isFinished.set(Bool(true));
 
     return candidates;

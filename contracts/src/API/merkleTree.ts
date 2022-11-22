@@ -2,7 +2,7 @@ import {
     Field
   } from 'snarkyjs';
 
-const merkletree = (
+const merkleTreeJSON = (
     leaves: Field[],
     root: Field
 ) => {
@@ -17,4 +17,4 @@ const merkletree = (
     return treeJson
 }
 
-module.exports = { merkletree }
+module.exports = { merkleTreeJSON }
