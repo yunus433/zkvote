@@ -126,6 +126,18 @@ export class Vote extends SmartContract {
     this.candidatesTree.set(candidatesTreeRoot);
   };
 
+  @method identityCommitment(
+    key: PrivateKey,
+    nullifier: Field
+  ): Field {
+
+    let publicKey = key.toPublicKey() // check if this public key exists in the voters merkle
+    let identityCommitment: Field = Poseidon.hash([Field(publicKey.toBase58()).add(nullifier)]) // hash sum of public key and nullifier
+    return identityCommitment // store this in a new merkle tree
+    // Only public keys included in merkle tree that is posted by election creator can create an identity commitmen
+    // Inputs of this method is private and output is not predictable if tx is relayed.
+
+  }
   // Vote for the election. Can be called only once for each voter. Single voting (one voter -> one candidate)
   @method vote(
     key: PrivateKey,
