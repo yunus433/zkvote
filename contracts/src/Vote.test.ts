@@ -204,4 +204,10 @@ describe('Vote', () => {
 
     expect(zkVotersTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
   });
+
+  it('tally votes', async () => {
+    let results = zkAppInstance.tally();
+    expect(results[0]).toEqual()(Field(1));
+    expect(results[2]).toEqual()(Field(1));
+  });
 });
