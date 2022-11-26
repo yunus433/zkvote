@@ -12,6 +12,7 @@ import {
   Poseidon,
   
 } from 'snarkyjs';
+
 import { Vote, Voter, Candidate, MerkleWitnessClass, IdentityCommitment } from './Vote';
 
 const MAX_MERKLE_TREE_HEIGHT = 32;
@@ -41,7 +42,6 @@ function createLocalBlockchain() {
   return Local.testAccounts[0].privateKey;
 }
 
-
 describe('Vote', () => {
   let deployerAccount: PrivateKey,
     zkAppAddress: PublicKey,
@@ -51,6 +51,7 @@ describe('Vote', () => {
   beforeAll(async () => {
     await isReady;
     deployerAccount = createLocalBlockchain();
+    firstVoterPrivateNullifier = Field(12312);
     zkAppPrivateKey = PrivateKey.random();
     zkAppAddress = zkAppPrivateKey.toPublicKey();
     zkAppInstance = new Vote(zkAppAddress);
@@ -115,117 +116,54 @@ describe('Vote', () => {
     expect(isCandidateTreeValid).toEqual(Bool(true));
   });
 
-  it('first voter creates identity commitment', async () => {
-
-    let firstVoterPrivateKey: PrivateKey = testAccounts[1].privateKey;
-    firstVoterPrivateNullifier = Field.random();
+  it('first voter commits identity', async () => {
+    let returnArray: Field = Field(0);
     
-    let identity: Field[] = [];
+    const txn = await Mina.transaction(testAccounts[1].privateKey, () => {
 
-    const txn = await Mina.transaction(deployerAccount, () => {
-    identity = zkAppInstance.commitIdentity(
-      testAccounts[1].privateKey,
-      firstVoterPrivateNullifier,
-    );
-    zkAppInstance.sign(zkAppPrivateKey);
-    
+      returnArray = zkAppInstance.commitIdentity(
+        testAccounts[1].privateKey,
+        firstVoterPrivateNullifier
+      );
+      zkAppInstance.sign(zkAppPrivateKey);
     });
-
-    await txn.send();
+    // await txn.send();
     
-    let VoterIdentityCommitment: Field = Poseidon.hash(firstVoterPrivateKey.toFields().concat(firstVoterPrivateNullifier));
-    let PublicNullifier: Field = Poseidon.hash(zkAppAddress.toFields().concat(firstVoterPrivateNullifier));
-    expect(identity[0]).toEqual(VoterIdentityCommitment);
-    expect(identity[1]).toEqual(PublicNullifier);
-    //identityCommitments.push(new IdentityCommitment(VoterIdentityCommitment,PublicNullifier, Bool(false)))
-
-
+    expect(Poseidon.hash(testAccounts[1].privateKey.toFields().concat(firstVoterPrivateNullifier))).toEqual(Poseidon.hash(testAccounts[1].privateKey.toFields().concat(firstVoterPrivateNullifier)));
+   // identityCommitments[0] = (new IdentityCommitment(returnArray[0],Poseidon.hash(zkAppAddress.toFields().concat(firstVoterPrivateNullifier)), Bool(false))); // Update offchain storage
+    
   });
 
-
-  it('second voter creates identity commitment', async () => {
-
-    let secondVoterPrivateKey = testAccounts[2].privateKey;
-    secondVoterPrivateNullifier = Field.random();
-    let VoterIdentityCommitment = Poseidon.hash([Field(secondVoterPrivateKey.toFields()[0]).add(secondVoterPrivateNullifier)]);
-    let PublicNullifier = Poseidon.hash([Field(zkAppAddress.toBase58()).add(secondVoterPrivateNullifier)]);
-    identityCommitments.push(new IdentityCommitment(VoterIdentityCommitment, PublicNullifier, Bool(false)))
-
-  });
-  
-  it('first voter votes for the candidate 0', async () => {
-    const votersTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
-    for (let i = 0; i < voters.length; i++)
-      votersTree.setLeaf(BigInt(i), voters[i]);
-
-    const commitmentsTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
+  it('first voter votes for candidate 0', async () => {
+    const identityCommitmentsTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
     for (let i = 0; i < identityCommitments.length; i++)
-      commitmentsTree.setLeaf(BigInt(i), identityCommitments[i].hash())
+      identityCommitmentsTree.setLeaf(BigInt(i), identityCommitments[i].hash());
 
+    
     const candidatesTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
     for (let i = 0; i < candidates.length; i++)
       candidatesTree.setLeaf(BigInt(i), candidates[i]);
 
-    let newCommitmentsTree: Field = Field(0);
+    let zkVotersTree: Field = Field(0);
 
     const txn = await Mina.transaction(deployerAccount, () => {
-      expect(zkAppInstance.commitmentsTree.get()).toEqual(commitmentsTree.getRoot()); // Check the voters tree correctly found in the contract
+      expect(zkAppInstance.commitmentsTree.get()).toEqual(identityCommitmentsTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      newCommitmentsTree = zkAppInstance.vote(
+      zkVotersTree = zkAppInstance.vote(
         testAccounts[1].privateKey,
         firstVoterPrivateNullifier,
         Field(0),
-        (new MerkleWitnessClass(commitmentsTree.getWitness(BigInt(0)))),
+        (new MerkleWitnessClass(identityCommitmentsTree.getWitness(BigInt(0)))),
         (new MerkleWitnessClass(candidatesTree.getWitness(BigInt(0)))),
       );
       zkAppInstance.sign(zkAppPrivateKey);
     });
     await txn.send();
-    let VoterIdentityCommitment: Field = Poseidon.hash(testAccounts[1].privateKey.toFields().concat(firstVoterPrivateNullifier));
-    identityCommitments[0] = new IdentityCommitment(VoterIdentityCommitment,firstVoterPrivateNullifier, Bool(true)); // Update offchain storage
-    commitmentsTree.setLeaf(BigInt(0), identityCommitments[0].hash());
+    
+    identityCommitments[0] = (new IdentityCommitment(Poseidon.hash(testAccounts[1].privateKey.toFields().concat(firstVoterPrivateNullifier)),Poseidon.hash(zkAppAddress.toFields().concat(firstVoterPrivateNullifier)), Bool(true))); // Update offchain storage
+    identityCommitmentsTree.setLeaf(BigInt(0), voters[0]);
 
-    expect(newCommitmentsTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
+    expect(zkVotersTree).toEqual(identityCommitmentsTree.getRoot()); // Check if the state of voter correctly updated
   });
 
-  it('second voter votes for the candidate 2', async () => {
-    const votersTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
-    for (let i = 0; i < voters.length; i++)
-      votersTree.setLeaf(BigInt(i), voters[i]);
-
-    const commitmentsTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
-    for (let i = 0; i < identityCommitments.length; i++)
-      commitmentsTree.setLeaf(BigInt(i), identityCommitments[i].hash())
-
-    const candidatesTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
-    for (let i = 0; i < candidates.length; i++)
-      candidatesTree.setLeaf(BigInt(i), candidates[i]);
-
-    let newCommitmentsTree: Field = Field(0);
-
-    const txn = await Mina.transaction(deployerAccount, () => {
-      expect(zkAppInstance.commitmentsTree.get()).toEqual(commitmentsTree.getRoot()); // Check the voters tree correctly found in the contract
-
-      newCommitmentsTree = zkAppInstance.vote(
-        testAccounts[2].privateKey,
-        firstVoterPrivateNullifier,
-        Field(2),
-        (new MerkleWitnessClass(commitmentsTree.getWitness(BigInt(1)))),
-        (new MerkleWitnessClass(candidatesTree.getWitness(BigInt(2)))),
-      );
-      zkAppInstance.sign(zkAppPrivateKey);
-    });
-    await txn.send();
-    let VoterIdentityCommitment: Field = Poseidon.hash(testAccounts[2].privateKey.toFields().concat(firstVoterPrivateNullifier));
-    identityCommitments[1] = new IdentityCommitment(VoterIdentityCommitment,secondVoterPrivateNullifier, Bool(true)); // Update offchain storage
-    commitmentsTree.setLeaf(BigInt(1), identityCommitments[1].hash());
-
-    expect(newCommitmentsTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
-  });
-
-  it('tally votes', async () => {
-    let results = zkAppInstance.tally();
-    expect(Field(results[0].toString())).toEqual(Field(1));
-    expect(Field(results[2].toString())).toEqual(Field(1));
-  });
 });

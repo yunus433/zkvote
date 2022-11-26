@@ -154,12 +154,12 @@ export class Vote extends SmartContract {
   @method commitIdentity(
     key: PrivateKey,
     nullifier: Field
-  ): Field[] {
+  ): Field {
     let publicKey = key.toPublicKey(); // check if this public key exists in the voters merkle
     let identityCommitment: Field = Poseidon.hash(key.toFields().concat(nullifier)); // hash sum of public key and nullifier
     let publicNullifier: Field = Poseidon.hash(this.address.toFields().concat(nullifier));
-    let returnArray: Field[] = [identityCommitment,publicNullifier]; // cannot return tuple
-    return returnArray
+    //let returnArray: Field[] = [identityCommitment,publicNullifier]; // cannot return tuple
+    return identityCommitment
      // store this in a new merkle tree
     // Only public keys included in merkle tree that is posted by election creator can create an identity commitmen
     // Inputs of this method is private and output is not predictable if tx is relayed.
