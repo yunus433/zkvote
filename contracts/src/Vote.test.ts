@@ -31,8 +31,8 @@ let electionProps: {
   candidateCount: Field
 }; // Initilization conditions, not stored anywhere normally
 
-let firstVoterPrivateNullifier; // mimics local storage of voter number one
-let secondVoterPrivateNullifier; // mimics local storage of voter number two
+let firstVoterPrivateNullifier: Field; // mimics local storage of voter number one
+let secondVoterPrivateNullifier: Field; // mimics local storage of voter number two
 
 function createLocalBlockchain() {
   const Local = Mina.LocalBlockchain();
@@ -40,6 +40,7 @@ function createLocalBlockchain() {
   testAccounts = Local.testAccounts;
   return Local.testAccounts[0].privateKey;
 }
+
 
 describe('Vote', () => {
   let deployerAccount: PrivateKey,
@@ -116,11 +117,28 @@ describe('Vote', () => {
 
   it('first voter creates identity commitment', async () => {
 
-    let firstVoterPrivateKey = testAccounts[1].privateKey;
+    let firstVoterPrivateKey: PrivateKey = testAccounts[1].privateKey;
     firstVoterPrivateNullifier = Field.random();
-    let VoterIdentityCommitment = Poseidon.hash([Field(firstVoterPrivateKey.toBase58()).add(firstVoterPrivateNullifier)]);
-    let PublicNullifier = Poseidon.hash([Field(zkAppAddress.toBase58()).add(firstVoterPrivateNullifier)]);
-    identityCommitments.push(new IdentityCommitment(VoterIdentityCommitment,PublicNullifier, Bool(false)))
+    
+    let identity: Field[] = [];
+
+    const txn = await Mina.transaction(deployerAccount, () => {
+    identity = zkAppInstance.commitIdentity(
+      testAccounts[1].privateKey,
+      firstVoterPrivateNullifier,
+    );
+    zkAppInstance.sign(zkAppPrivateKey);
+    
+    });
+
+    await txn.send();
+    
+    let VoterIdentityCommitment: Field = Poseidon.hash(firstVoterPrivateKey.toFields().concat(firstVoterPrivateNullifier));
+    let PublicNullifier: Field = Poseidon.hash(zkAppAddress.toFields().concat(firstVoterPrivateNullifier));
+    expect(identity[0]).toEqual(VoterIdentityCommitment);
+    expect(identity[1]).toEqual(PublicNullifier);
+    //identityCommitments.push(new IdentityCommitment(VoterIdentityCommitment,PublicNullifier, Bool(false)))
+
 
   });
 
@@ -129,7 +147,7 @@ describe('Vote', () => {
 
     let secondVoterPrivateKey = testAccounts[2].privateKey;
     secondVoterPrivateNullifier = Field.random();
-    let VoterIdentityCommitment = Poseidon.hash([Field(secondVoterPrivateKey.toBase58()).add(secondVoterPrivateNullifier)]);
+    let VoterIdentityCommitment = Poseidon.hash([Field(secondVoterPrivateKey.toFields()[0]).add(secondVoterPrivateNullifier)]);
     let PublicNullifier = Poseidon.hash([Field(zkAppAddress.toBase58()).add(secondVoterPrivateNullifier)]);
     identityCommitments.push(new IdentityCommitment(VoterIdentityCommitment, PublicNullifier, Bool(false)))
 
@@ -148,12 +166,12 @@ describe('Vote', () => {
     for (let i = 0; i < candidates.length; i++)
       candidatesTree.setLeaf(BigInt(i), candidates[i]);
 
-    let zkVotersTree: Field = Field(0);
+    let newCommitmentsTree: Field = Field(0);
 
     const txn = await Mina.transaction(deployerAccount, () => {
       expect(zkAppInstance.commitmentsTree.get()).toEqual(commitmentsTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      zkVotersTree = zkAppInstance.vote(
+      newCommitmentsTree = zkAppInstance.vote(
         testAccounts[1].privateKey,
         firstVoterPrivateNullifier,
         Field(0),
@@ -163,11 +181,11 @@ describe('Vote', () => {
       zkAppInstance.sign(zkAppPrivateKey);
     });
     await txn.send();
-    
-    identityCommitments[0] = new IdentityCommitment(Field(testAccounts[1].privateKey.toBase58()),firstVoterPrivateNullifier, Bool(true)); // Update offchain storage
+    let VoterIdentityCommitment: Field = Poseidon.hash(testAccounts[1].privateKey.toFields().concat(firstVoterPrivateNullifier));
+    identityCommitments[0] = new IdentityCommitment(VoterIdentityCommitment,firstVoterPrivateNullifier, Bool(true)); // Update offchain storage
     commitmentsTree.setLeaf(BigInt(0), identityCommitments[0].hash());
 
-    expect(zkVotersTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
+    expect(newCommitmentsTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
   });
 
   it('second voter votes for the candidate 2', async () => {
@@ -183,12 +201,12 @@ describe('Vote', () => {
     for (let i = 0; i < candidates.length; i++)
       candidatesTree.setLeaf(BigInt(i), candidates[i]);
 
-    let zkVotersTree: Field = Field(0);
+    let newCommitmentsTree: Field = Field(0);
 
     const txn = await Mina.transaction(deployerAccount, () => {
       expect(zkAppInstance.commitmentsTree.get()).toEqual(commitmentsTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      zkVotersTree = zkAppInstance.vote(
+      newCommitmentsTree = zkAppInstance.vote(
         testAccounts[2].privateKey,
         firstVoterPrivateNullifier,
         Field(2),
@@ -198,16 +216,16 @@ describe('Vote', () => {
       zkAppInstance.sign(zkAppPrivateKey);
     });
     await txn.send();
-    
-    identityCommitments[1] = new IdentityCommitment(Field(testAccounts[2].privateKey.toBase58()),firstVoterPrivateNullifier, Bool(true)); // Update offchain storage
+    let VoterIdentityCommitment: Field = Poseidon.hash(testAccounts[2].privateKey.toFields().concat(firstVoterPrivateNullifier));
+    identityCommitments[1] = new IdentityCommitment(VoterIdentityCommitment,secondVoterPrivateNullifier, Bool(true)); // Update offchain storage
     commitmentsTree.setLeaf(BigInt(1), identityCommitments[1].hash());
 
-    expect(zkVotersTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
+    expect(newCommitmentsTree).toEqual(commitmentsTree.getRoot()); // Check if the state of voter correctly updated
   });
 
   it('tally votes', async () => {
     let results = zkAppInstance.tally();
-    expect(results[0]).toEqual()(Field(1));
-    expect(results[2]).toEqual()(Field(1));
+    expect(Field(results[0].toString())).toEqual(Field(1));
+    expect(Field(results[2].toString())).toEqual(Field(1));
   });
 });
