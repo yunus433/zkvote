@@ -22,9 +22,30 @@ const MAX_MERKLE_TREE_HEIGHT = 32;
 
 export class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) { }
 
+export class IdentityCommitment extends Struct({
+  identity: Field,
+  public_nullifier: Field,
+  isVoted: Bool
+}) {
+  constructor(identity: Field, public_nullifier: Field, isVoted: Bool) {
+    super({ identity, public_nullifier, isVoted });
+    this.identity = identity;
+    this.public_nullifier = public_nullifier;
+    this.isVoted = isVoted;
+  }
+
+  hash(): Field {
+    return Poseidon.hash(this.identity.toFields().concat(this.public_nullifier.toFields()));
+  }
+
+  vote(): IdentityCommitment {
+    return new IdentityCommitment(this.identity,this.public_nullifier, Bool(true));
+  }
+};
+
 export class Voter extends Struct({
   key: PublicKey,
-  isVoted: Bool,
+  isVoted: Bool
 }) {
   constructor(key: PublicKey, isVoted: Bool) {
     super({ key, isVoted });
@@ -66,12 +87,14 @@ export class Candidate extends CircuitValue {
   }
 };
 
+
 export class Vote extends SmartContract {
   @state(Bool) isFinished = State<Bool>(); // If tally function is yet called or not
   @state(UInt64) startTime = State<UInt64>(); // The start time of the election in UNIX Time
   @state(UInt64) endTime = State<UInt64>(); // The end time of the election in UNIX Time
   @state(Field) candidateCount = State<Field>(); // How many candidates to vote for
   @state(Field) votersTree = State<Field>(); // Merkle root of voters
+  @state(Field) commitmentsTree = State<Field>(); // Merkle root of voters
   @state(Field) candidatesTree = State<Field>(); // Merkle root of candidates
   @state(Field) candidatesTreeAccumulator = State<Field>(); // Merkle root of candidates as accumulator for the use of reducer
 
@@ -95,6 +118,7 @@ export class Vote extends SmartContract {
     this.candidateCount.set(Field(0));
     this.isFinished.set(Bool(false));
     this.votersTree.set(Field(0));
+    this.commitmentsTree.set(Field(0));
     this.candidatesTree.set(Field(0));
     this.candidatesTreeAccumulator.set(Reducer.initialActionsHash);
   };
@@ -141,8 +165,9 @@ export class Vote extends SmartContract {
   // Vote for the election. Can be called only once for each voter. Single voting (one voter -> one candidate)
   @method vote(
     key: PrivateKey,
+    nullifier: Field,
     candidate: Field,
-    voterPath: MerkleWitnessClass,
+    commitmentPath: MerkleWitnessClass,
     candidatePath: MerkleWitnessClass
   ): Field {
     // Election Conditions
@@ -157,20 +182,22 @@ export class Vote extends SmartContract {
     // );
 
     // Voter Conditions
-    let votersTree = this.votersTree.get(); // Get merkle root for voters from the state
-    this.votersTree.assertEquals(votersTree);
-    const voter = new Voter(key.toPublicKey(), Bool(false)); // Create a new voter with public key and is_voted: false
-    voterPath.calculateRoot(voter.hash()).assertEquals(votersTree); // If already voted this voter will not be in the tree
-
+    let commitmentsTree = this.commitmentsTree.get(); // Get merkle root for voters from the state
+    this.commitmentsTree.assertEquals(commitmentsTree);
+    let VoterIdentityCommitment = Poseidon.hash([Field(key.toBase58()).add(nullifier)]);
+    let PublicNullifier = Poseidon.hash([Field(this.address.toBase58()).add(nullifier)]);
+    const identityCommitment = new IdentityCommitment(VoterIdentityCommitment,PublicNullifier, Bool(false)); // Create a new voter with public key and is_voted: false
+    commitmentPath.calculateRoot(identityCommitment.hash()).assertEquals(commitmentsTree); // If already voted this voter will not be in the tree
+    
     // Ballot Conditions
     const candidateCount = this.candidateCount.get();
     this.candidateCount.assertEquals(candidateCount);
     candidate.assertLt(Field(candidateCount));
 
     // Set merkle tree is_voted: true
-    const newVoter = voter.vote();
-    const newVotersTree = voterPath.calculateRoot(newVoter.hash());
-    this.votersTree.set(newVotersTree);
+    const newIdentityCommitment = identityCommitment.vote();
+    const newCommitmentsTree = commitmentPath.calculateRoot(newIdentityCommitment.hash());
+    this.commitmentsTree.set(newCommitmentsTree);
 
     // Dispatch the event as a new Candidate
     const newCandidate = new Candidate(candidate, Field(0), candidatePath); // Create a new candidate with given vote
@@ -181,7 +208,7 @@ export class Vote extends SmartContract {
     // Dispatch the event
     this.reducer.dispatch(newCandidate);
 
-    return newVotersTree;
+    return newCommitmentsTree;
   };
 
   // Tally the election. Count the votes in events and update candidateTree root. Returns an array representing the vote number for each candidate. Can be called only once
