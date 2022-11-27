@@ -1,38 +1,38 @@
 import {
+  AccountUpdate,
+  Bool,
+  Field,
   isReady,
+  MerkleTree,
   Mina,
-  shutdown,
   PrivateKey,
   PublicKey,
-  AccountUpdate,
-  UInt64,
-  MerkleTree,
-  Field,
-  Bool
+  shutdown,
 } from 'snarkyjs';
-import { Vote, Voter, Candidate, MerkleWitnessClass } from './Vote';
+
+import {
+  Candidate,
+  MerkleWitnessClass,
+  Vote,
+  Voter,
+} from './Vote';
 
 const DEFAULT_PASSWORD = 0;
 const MAX_MERKLE_TREE_HEIGHT = 32;
 
+let candidates: Field[]; // Offchain storage to test
 let testAccounts: {
   publicKey: PublicKey;
   privateKey: PrivateKey;
-}[];
+}[]; // Test Accounts
 let voters: Field[]; // Offchain storage to test
-let candidates: Field[]; // Offchain storage to test
-let electionProps: {
-  startTime: UInt64,
-  endTime: UInt64,
-  candidateCount: Field
-}; // Initilization conditions, not stored anywhere normally
 
 function createLocalBlockchain() {
   const Local = Mina.LocalBlockchain();
   Mina.setActiveInstance(Local);
   testAccounts = Local.testAccounts;
   return Local.testAccounts[0].privateKey;
-}
+};
 
 describe('Vote', () => {
   let deployerAccount: PrivateKey,
@@ -63,13 +63,7 @@ describe('Vote', () => {
     setTimeout(shutdown, 0);
   });
 
-  it('generates and deploys the `Vote` smart contract with election params', async () => {
-    electionProps = {
-      startTime: UInt64.from((new Date()).getTime() - 500),
-      endTime: UInt64.from((new Date()).getTime() + (60 * 60 * 1000)),
-      candidateCount: Field(5)
-    };
-
+  it('generates and deploys the `Vote` smart contract', async () => {
     const votersTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
     for (let i = 0; i < voters.length; i++)
       votersTree.setLeaf(BigInt(i), voters[i]);
@@ -80,7 +74,6 @@ describe('Vote', () => {
 
     const txn = await Mina.transaction(deployerAccount, () => {
       zkAppInstance.start(
-        electionProps.candidateCount,
         votersTree.getRoot(),
         candidatesTree.getRoot()
       );
@@ -88,7 +81,7 @@ describe('Vote', () => {
     });
     await txn.send();
 
-    expect(zkAppInstance.candidateCount.get()).toEqual(electionProps.candidateCount);
+    expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot());
     expect(zkAppInstance.candidatesTree.get()).toEqual(candidatesTree.getRoot());
   });
 
@@ -100,8 +93,6 @@ describe('Vote', () => {
     const candidatesTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
     for (let i = 0; i < candidates.length; i++)
       candidatesTree.setLeaf(BigInt(i), candidates[i]);
-
-    let zkVotersTree: Field = Field(0);
 
     const random = Field(Math.floor(Math.random() * 10000000));
 
@@ -119,7 +110,7 @@ describe('Vote', () => {
     await txn.send();
 
     const txn2 = await Mina.transaction(deployerAccount, () => {
-      zkVotersTree = zkAppInstance.vote(
+      zkAppInstance.vote(
         testAccounts[1].privateKey,
         random,
         Field(0),
@@ -133,7 +124,7 @@ describe('Vote', () => {
     voters[0] = (new Voter(testAccounts[1].publicKey, random, Bool(true))).hash(); // Update offchain storage
     votersTree.setLeaf(BigInt(0), voters[0]);
 
-    expect(zkVotersTree).toEqual(votersTree.getRoot()); // Check if the state of voter correctly updated
+    expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check if the state of voter correctly updated
   });
 
   it('second voter votes for the candidate 0', async () => {
@@ -144,8 +135,6 @@ describe('Vote', () => {
     const candidatesTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
     for (let i = 0; i < candidates.length; i++)
       candidatesTree.setLeaf(BigInt(i), candidates[i]);
-
-    let zkVotersTree: Field = Field(0);
 
     const random = Field(Math.floor(Math.random() * 10000000));
 
@@ -163,7 +152,7 @@ describe('Vote', () => {
     await txn.send();
 
     const txn2 = await Mina.transaction(deployerAccount, () => {
-      zkVotersTree = zkAppInstance.vote(
+      zkAppInstance.vote(
         testAccounts[2].privateKey,
         random,
         Field(0),
@@ -177,7 +166,49 @@ describe('Vote', () => {
     voters[1] = (new Voter(testAccounts[2].publicKey, random, Bool(true))).hash(); // Update offchain storage
     votersTree.setLeaf(BigInt(1), voters[1]);
 
-    expect(zkVotersTree).toEqual(votersTree.getRoot()); // Check if the state of voter correctly updated
+    expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check if the state of voter correctly updated
+  });
+
+  it('third voter votes for the candidate 1', async () => {
+    const votersTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
+    for (let i = 0; i < voters.length; i++)
+      votersTree.setLeaf(BigInt(i), voters[i]);
+
+    const candidatesTree = new MerkleTree(MAX_MERKLE_TREE_HEIGHT);
+    for (let i = 0; i < candidates.length; i++)
+      candidatesTree.setLeaf(BigInt(i), candidates[i]);
+
+    const random = Field(Math.floor(Math.random() * 10000000));
+
+    const txn = await Mina.transaction(deployerAccount, () => {
+      expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check the voters tree correctly found in the contract
+
+      zkAppInstance.setPassword(
+        testAccounts[3].privateKey,
+        Field(DEFAULT_PASSWORD),
+        random,
+        (new MerkleWitnessClass(votersTree.getWitness(BigInt(2)))), // voter 2
+      );
+      zkAppInstance.sign(zkAppPrivateKey);
+    });
+    await txn.send();
+
+    const txn2 = await Mina.transaction(deployerAccount, () => {
+      zkAppInstance.vote(
+        testAccounts[3].privateKey,
+        random,
+        Field(1),
+        (new MerkleWitnessClass(votersTree.getWitness(BigInt(2)))), // voter 2
+        (new MerkleWitnessClass(candidatesTree.getWitness(BigInt(1)))), // candidate 1
+      );
+      zkAppInstance.sign(zkAppPrivateKey);
+    });
+    await txn2.send();
+    
+    voters[2] = (new Voter(testAccounts[3].publicKey, random, Bool(true))).hash(); // Update offchain storage
+    votersTree.setLeaf(BigInt(2), voters[2]);
+
+    expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check if the state of voter correctly updated
   });
 
   it('tally election and returns each candidate count correctly', async () => {
@@ -187,7 +218,7 @@ describe('Vote', () => {
     });
     await txn.send();
 
-    let candidate0VoteCount = Field(0), candidate1VoteCount = Field(0);
+    let candidate0VoteCount = Field(0), candidate1VoteCount = Field(0), candidate2VoteCount = Field(0);
 
     const txn2 = await Mina.transaction(deployerAccount, () => {
       candidate0VoteCount = zkAppInstance.count(Field(0));
@@ -195,14 +226,20 @@ describe('Vote', () => {
     });
     await txn2.send();
 
-    expect(candidate0VoteCount).toEqual(Field(2));
-
     const txn3 = await Mina.transaction(deployerAccount, () => {
       candidate1VoteCount = zkAppInstance.count(Field(1));
       zkAppInstance.sign(zkAppPrivateKey);
     });
     await txn3.send();
 
-    expect(candidate1VoteCount).toEqual(Field(0));
-  })
+    const txn4 = await Mina.transaction(deployerAccount, () => {
+      candidate2VoteCount = zkAppInstance.count(Field(2));
+      zkAppInstance.sign(zkAppPrivateKey);
+    });
+    await txn4.send();
+
+    expect(candidate0VoteCount).toEqual(Field(2));
+    expect(candidate1VoteCount).toEqual(Field(1));
+    expect(candidate2VoteCount).toEqual(Field(0));
+  });
 });
