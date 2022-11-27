@@ -12,6 +12,7 @@ import {
   UInt64,
   PublicKey,
   MerkleWitness,
+  MerkleTree,
   Reducer,
   Struct,
   CircuitValue,
@@ -91,7 +92,6 @@ export class Candidate extends CircuitValue {
 
 export class Vote extends SmartContract {
   @state(Bool) isFinished = State<Bool>(); // If tally function is yet called or not
-  @state(UInt64) startTime = State<UInt64>(); // The start time of the election in UNIX Time
   @state(UInt64) endTime = State<UInt64>(); // The end time of the election in UNIX Time
   @state(Field) candidateCount = State<Field>(); // How many candidates to vote for
   @state(Field) votersTree = State<Field>(); // Merkle root of voters
@@ -114,7 +114,6 @@ export class Vote extends SmartContract {
       editSequenceState: Permissions.proofOrSignature(),
     });
     
-    this.startTime.set(UInt64.from(0));
     this.endTime.set(UInt64.from(0)); // Keeps from voters to vote before the start of election
     this.candidateCount.set(Field(0));
     this.isFinished.set(Bool(false));
@@ -144,7 +143,6 @@ export class Vote extends SmartContract {
 
     candidateCount.assertGt(Field(0));
     
-    this.startTime.set(startTime);
     this.endTime.set(endTime);
     this.candidateCount.set(candidateCount);
     this.votersTree.set(votersTreeRoot);
@@ -153,13 +151,25 @@ export class Vote extends SmartContract {
 
   @method commitIdentity(
     key: PrivateKey,
-    nullifier: Field
-  ): Field {
-    let publicKey = key.toPublicKey(); // check if this public key exists in the voters merkle
+    nullifier: Field,
+    voterPath: MerkleWitnessClass,
+    commitmentPath: MerkleWitnessClass
+  ): Field[] {
+
+    let votersTree = this.votersTree.get(); // Get merkle root for voters from the state
+    this.votersTree.assertEquals(votersTree);
+    const voter = new Voter(key.toPublicKey(), Bool(false)); // Create a new voter with public key and is_voted: false
+    voterPath.calculateRoot(voter.hash()).assertEquals(votersTree); // If already voted this voter will not be in the tree
+
+
     let identityCommitment: Field = Poseidon.hash(key.toFields().concat(nullifier)); // hash sum of public key and nullifier
     let publicNullifier: Field = Poseidon.hash(this.address.toFields().concat(nullifier));
-    //let returnArray: Field[] = [identityCommitment,publicNullifier]; // cannot return tuple
-    return identityCommitment
+
+    const newIdentityCommitment = new IdentityCommitment(identityCommitment,publicNullifier,Bool(false));
+    const newCommitmentsTree = commitmentPath.calculateRoot(newIdentityCommitment.hash());
+    this.commitmentsTree.assertEquals(this.commitmentsTree.get());
+    this.commitmentsTree.set(newCommitmentsTree); 
+    return [identityCommitment,publicNullifier]
      // store this in a new merkle tree
     // Only public keys included in merkle tree that is posted by election creator can create an identity commitmen
     // Inputs of this method is private and output is not predictable if tx is relayed.
@@ -176,19 +186,12 @@ export class Vote extends SmartContract {
     // Election Conditions
     // Chech if tally is not called yet
     this.isFinished.assertEquals(Bool(false));
-    // // Check if election is started and not finished
-    // this.startTime.assertEquals(this.startTime.get());
-    // this.endTime.assertEquals(this.endTime.get());
-    // this.network.timestamp.assertBetween(
-    //   this.startTime.get(),
-    //   this.endTime.get()  
-    // );
-
+ 
     // Voter Conditions
     let commitmentsTree = this.commitmentsTree.get(); // Get merkle root for voters from the state
     this.commitmentsTree.assertEquals(commitmentsTree);
-    let VoterIdentityCommitment = Poseidon.hash([Field(key.toBase58()).add(nullifier)]);
-    let PublicNullifier = Poseidon.hash([Field(this.address.toBase58()).add(nullifier)]);
+    let VoterIdentityCommitment = Poseidon.hash(key.toFields().concat(nullifier))
+    let PublicNullifier = Poseidon.hash(this.address.toFields().concat(nullifier));
     const identityCommitment = new IdentityCommitment(VoterIdentityCommitment,PublicNullifier, Bool(false)); // Create a new voter with public key and is_voted: false
     commitmentPath.calculateRoot(identityCommitment.hash()).assertEquals(commitmentsTree); // If already voted this voter will not be in the tree
     
