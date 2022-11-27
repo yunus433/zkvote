@@ -9,7 +9,6 @@ import {
   Bool,
   Poseidon,
   PrivateKey,
-  UInt64,
   PublicKey,
   MerkleWitness,
   Reducer,
@@ -20,14 +19,12 @@ import {
 } from 'snarkyjs';
 
 const DEFAULT_PASSWORD = 0;
-const MAX_CANDIDATE_COUNT = 1e3;
 const MAX_MERKLE_TREE_HEIGHT = 32;
 
 const STATUS = {
   DEPLOYED: 0, // Contract is deployed, voters are not yet set
   STARTED: 1, // Election is started, password for all voters is DEFAULT_PASSWORD
-  SECURED: 2, // Voters set their password, voting process now is started
-  FINISHED: 3 // Voter process is now complete, count function can be called
+  FINISHED: 2 // Voter process is now complete, count function can be called
 }
 
 export class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) { }
@@ -87,7 +84,6 @@ export class Candidate extends CircuitValue {
 export class Vote extends SmartContract {
   @state(Field) status = State<Field>(); // Status of the election. Generated from STATUS object
   @state(Field) candidateCount = State<Field>(); // How many candidates to vote for
-  @state(Field) secureVoterCount = State<Field>(); // How many candidates are ready to vote
   @state(Field) votersTree = State<Field>(); // Merkle root of voters
   @state(Field) candidatesTree = State<Field>(); // Merkle root of candidates
   @state(Field) candidatesTreeAccumulator = State<Field>(); // Merkle root of candidates as accumulator for the use of reducer
@@ -108,7 +104,6 @@ export class Vote extends SmartContract {
     });
     
     this.candidateCount.set(Field(0));
-    this.secureVoterCount.set(Field(0));
     this.status.set(Field(STATUS.DEPLOYED));
     this.votersTree.set(Field(0));
     this.candidatesTree.set(Field(0));
@@ -131,9 +126,10 @@ export class Vote extends SmartContract {
     this.status.set(Field(STATUS.STARTED));
   };
 
-  // Set the vote of a voter. Can be called only once
+  // Set the vote of a voter. Can be called multiple times
   @method setPassword(
     key: PrivateKey, // Private Key of the voter to set the password
+    oldPassword: Field, // Previous field chosen by the voter as password
     password: Field, // Field chosen by the voter as password
     path: MerkleWitnessClass
   ) {
@@ -143,26 +139,13 @@ export class Vote extends SmartContract {
 
     let votersTree = this.votersTree.get();
     this.votersTree.assertEquals(votersTree);
-    const voter = new Voter(key.toPublicKey(), Field(DEFAULT_PASSWORD), Bool(false));
+    const voter = new Voter(key.toPublicKey(), oldPassword, Bool(false));
     path.calculateRoot(voter.hash()).assertEquals(votersTree);
 
     const newVoter = voter.setPassword(password);
     const newVotersTree = path.calculateRoot(newVoter.hash());
     this.votersTree.set(newVotersTree);
-    this.secureVoterCount.assertEquals(this.secureVoterCount.get());
-    this.secureVoterCount.set(this.secureVoterCount.get().add(Field(1)));
   };
-
-  // Start the vote. No password can be set after this point
-  @method startVote() {
-    this.status.assertEquals(Field(STATUS.STARTED));
-
-    const secureVoterCount = this.secureVoterCount.get();
-    this.secureVoterCount.assertEquals(secureVoterCount);
-    secureVoterCount.assertGt(Field(0)); // At least 1 voter to vote
-
-    this.status.set(Field(STATUS.SECURED));
-  }
 
   // Vote for the election. Can be called only once for each voter. Single voting (one voter -> one candidate)
   @method vote(
@@ -173,9 +156,9 @@ export class Vote extends SmartContract {
     candidatePath: MerkleWitnessClass
   ): Field {
     // Election Conditions
-    this.status.assertEquals(Field(STATUS.SECURED));
+    this.status.assertEquals(Field(STATUS.STARTED));
 
-    // Voters with the DEFAULT_PASSWORD cannot vote
+    // Voters with the DEFAULT_PASSWORD cannot vote to protect anonymity
     password.assertGt(Field(DEFAULT_PASSWORD));
 
     // Voter Conditions
@@ -209,7 +192,7 @@ export class Vote extends SmartContract {
   // Tally the election. Count the votes in events and update candidateTree root. Returns an array representing the vote number for each candidate. Can be called only once
   @method tally() {
     // Check tally is not yet called
-    this.status.assertEquals(Field(STATUS.SECURED));
+    this.status.assertEquals(Field(STATUS.STARTED));
 
     const candidatesCount = this.candidateCount.get();
     this.candidateCount.assertEquals(candidatesCount);
