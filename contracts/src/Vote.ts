@@ -18,41 +18,41 @@ import {
   Struct,
 } from 'snarkyjs';
 
-const DEFAULT_PASSWORD = 0;
-const MAX_MERKLE_TREE_HEIGHT = 32;
+const DEFAULT_NULLIFIER = 0; // can be changed base on need
+const MAX_MERKLE_TREE_HEIGHT = 32; // max 2^32 voters is supported
 
 const STATUS = {
-  DEPLOYED: 0, // Contract is deployed, voters (or candidates) are not yet set
-  STARTED: 1, // Election is started, password for all voters is DEFAULT_PASSWORD
-  FINISHED: 2 // Voter process is now complete, count function can be called
+  DEPLOYED: 0, // Contract is deployed, voters and candidates are not yet set.
+  STARTED: 1, // Election is started, vote_count of every candidate is 0 and nullifier for all voters is DEFAULT_NULLIFIER.
+  FINISHED: 2 // Tally is called. Voter process is now complete, count function can be called.
 };
 
 export class MerkleWitnessClass extends MerkleWitness(MAX_MERKLE_TREE_HEIGHT) {};
 
 export class Voter extends Struct({
   key: PublicKey,
-  password: Field,
+  nullifier: Field,
   isVoted: Bool,
 }) {
-  constructor(key: PublicKey, password: Field, isVoted: Bool) {
-    super({ key, password, isVoted });
-    this.password = password;
+  constructor(key: PublicKey, nullifier: Field, isVoted: Bool) {
+    super({ key, nullifier, isVoted });
+    this.nullifier = nullifier;
     this.key = key;
     this.isVoted = isVoted;
   }
 
   hash(): Field {
-    return Poseidon.hash(this.key.toFields().concat(this.password.toFields()).concat(this.isVoted.toFields()));
+    return Poseidon.hash(this.key.toFields().concat(this.nullifier.toFields()).concat(this.isVoted.toFields()));
   }
 
-  setPassword(
-    password: Field
+  setNullifier(
+    nullifier: Field
   ): Voter {
-    return new Voter(this.key, password, this.isVoted);
+    return new Voter(this.key, nullifier, this.isVoted);
   }
 
   vote(): Voter {
-    return new Voter(this.key, this.password, Bool(true));
+    return new Voter(this.key, this.nullifier, Bool(true));
   }
 };
 
@@ -122,49 +122,49 @@ export class Vote extends SmartContract {
   };
 
   // Set the vote of a voter. Can be called multiple times
-  @method setPassword(
-    key: PrivateKey, // Private Key of the voter to set the password
-    oldPassword: Field, // Previous field chosen by the voter as password
-    password: Field, // Field chosen by the voter as password
-    path: MerkleWitnessClass
+  @method setNullifier(
+    key: PrivateKey, // Private Key of the voter to set the nullifier
+    oldNullifier: Field, // Previous field chosen by the voter as nullifier
+    nullifier: Field, // Field chosen by the voter as new nullifier
+    path: MerkleWitnessClass // Path of the voter on the merkle tree
   ) {
     this.status.assertEquals(Field(STATUS.STARTED));
 
-    password.assertGt(Field(0));
+    nullifier.assertGt(Field(0));
 
     let votersTree = this.votersTree.get();
     this.votersTree.assertEquals(votersTree);
-    const voter = new Voter(key.toPublicKey(), oldPassword, Bool(false));
+    const voter = new Voter(key.toPublicKey(), oldNullifier, Bool(false));
     path.calculateRoot(voter.hash()).assertEquals(votersTree);
 
-    const newVoter = voter.setPassword(password);
+    const newVoter = voter.setNullifier(nullifier);
     const newVotersTree = path.calculateRoot(newVoter.hash());
     this.votersTree.set(newVotersTree);
   };
 
   // Vote for the election. Can be called only once for each voter. Single voting (one voter -> one candidate)
   @method vote(
-    key: PrivateKey,
-    password: Field,
-    candidate: Field,
-    voterPath: MerkleWitnessClass,
-    candidatePath: MerkleWitnessClass
+    key: PrivateKey, // Key of the voter to generate public key
+    nullifier: Field, // Nullifier of the voter to create anonymity
+    candidate: Field, // Candidate identifier - an index in this implementation
+    voterPath: MerkleWitnessClass, // Path of the voter in the merkle tree
+    candidatePath: MerkleWitnessClass // Path of the candidate (index) in the merkle tree
   ) {
     // Election Conditions
     this.status.assertEquals(Field(STATUS.STARTED));
 
-    // Voters with the DEFAULT_PASSWORD cannot vote to protect anonymity
-    password.assertGt(Field(DEFAULT_PASSWORD));
+    // Voters with the DEFAULT_NULLIFIER cannot vote to protect anonymity
+    nullifier.assertGt(Field(DEFAULT_NULLIFIER));
 
     // Voter Conditions
     let votersTree = this.votersTree.get(); // Get merkle root for voters from the state
     this.votersTree.assertEquals(votersTree);
-    const voter = new Voter(key.toPublicKey(), Field(password), Bool(false)); // Create a new voter with public key and is_voted: false
-    voterPath.calculateRoot(voter.hash()).assertEquals(votersTree); // If already voted this voter will not be in the tree
+    const voter = new Voter(key.toPublicKey(), Field(nullifier), Bool(false)); // Create a new voter with public key, given nullifier, and is_voted: false
+    voterPath.calculateRoot(voter.hash()).assertEquals(votersTree); // If the nullifier is not right or s/he has already voted this voter will not be in the tree
 
     // Set merkle tree is_voted: true
-    const newVoter = voter.vote();
-    const newVotersTree = voterPath.calculateRoot(newVoter.hash());
+    const newVoter = voter.vote(); // is_voted is updated
+    const newVotersTree = voterPath.calculateRoot(newVoter.hash()); // Recalculate the merkle tree with updated voter
     this.votersTree.set(newVotersTree);
 
     // Dispatch the event as a new Candidate
@@ -182,33 +182,37 @@ export class Vote extends SmartContract {
     // Check tally is not yet called
     this.status.assertEquals(Field(STATUS.STARTED));
 
+    // Initialize values
     const candidatesTree = this.candidatesTree.get();
     this.candidatesTree.assertEquals(candidatesTree);
     const candidatesTreeAccumulator = this.candidatesTreeAccumulator.get();
     this.candidatesTreeAccumulator.assertEquals(candidatesTreeAccumulator);
 
+    // Go over every vote given so far
     const { state: newCandidatesTree, actionsHash: newCandidatesTreeAccumulator } = this.reducer.reduce(
-      this.reducer.getActions({ fromActionHash: candidatesTreeAccumulator }),
-      Field, // state type
+      this.reducer.getActions({ fromActionHash: candidatesTreeAccumulator }), // Get votes hash from reducer
+      Field, // State type - merkle root
       (state: Field, action: Candidate) => {
-        action = action.addVote(); // Action hash changed
+        action = action.addVote(); // Add 1 vote to given candidate
 
-        return action.witness.calculateRoot(action.hash());
+        return action.witness.calculateRoot(action.hash()); // Update the merkle tree state
       },
       { state: candidatesTree, actionsHash: candidatesTreeAccumulator }
     );
 
-    // this.candidatesTreeAccumulator.set(newCandidatesTreeAccumulator); !!! IMPORTANT !!! Do not update accumulator for count function.
-    this.candidatesTree.set(newCandidatesTree);
-    this.status.set(Field(STATUS.FINISHED));
+    // this.candidatesTreeAccumulator.set(newCandidatesTreeAccumulator); // !!! IMPORTANT !!! Do not update accumulator for count function.
+    this.candidatesTree.set(newCandidatesTree); // Update candidatesTree - vote result may be verified
+    this.status.set(Field(STATUS.FINISHED)); // Count function can now be called
   };
 
-  // Count number of votes for only one candidate. TODO Count all the candidates at the same time and return array
+  // Count number of votes for only one candidate. TODO Count all the candidates at the same time and return array -> More optimized
   @method count(
     key: Field
   ): Field {
+    // Check tally is already called
     this.status.assertEquals(Field(STATUS.FINISHED));
 
+    // Initialize values
     const candidatesTree = this.candidatesTree.get();
     this.candidatesTree.assertEquals(candidatesTree);
     const candidatesTreeAccumulator = this.candidatesTreeAccumulator.get();
@@ -216,10 +220,9 @@ export class Vote extends SmartContract {
 
     const { state: voteCount, actionsHash: newCandidatesTreeAccumulator } = this.reducer.reduce(
       this.reducer.getActions({ fromActionHash: candidatesTreeAccumulator }),
-      Field, // state type
+      Field, // State type Field - number of votes on the given candidate
       (state: Field, action: Candidate) => {
-        action = action.addVote(); // Action hash changed
-        return state.add(Circuit.if(action.key.equals(key), Field(1), Field(0)));
+        return state.add(Circuit.if(action.key.equals(key), Field(1), Field(0))); // If the action key matches the given candidate, increase number of votes one time
       },
       { state: Field(0), actionsHash: candidatesTreeAccumulator }
     );

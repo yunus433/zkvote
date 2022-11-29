@@ -99,7 +99,7 @@ describe('Vote', () => {
     const txn = await Mina.transaction(deployerAccount, () => {
       expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      zkAppInstance.setPassword(
+      zkAppInstance.setNullifier(
         testAccounts[1].privateKey,
         Field(DEFAULT_PASSWORD),
         random,
@@ -141,7 +141,7 @@ describe('Vote', () => {
     const txn = await Mina.transaction(deployerAccount, () => {
       expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      zkAppInstance.setPassword(
+      zkAppInstance.setNullifier(
         testAccounts[2].privateKey,
         Field(DEFAULT_PASSWORD),
         random,
@@ -183,7 +183,7 @@ describe('Vote', () => {
     const txn = await Mina.transaction(deployerAccount, () => {
       expect(zkAppInstance.votersTree.get()).toEqual(votersTree.getRoot()); // Check the voters tree correctly found in the contract
 
-      zkAppInstance.setPassword(
+      zkAppInstance.setNullifier(
         testAccounts[3].privateKey,
         Field(DEFAULT_PASSWORD),
         random,
